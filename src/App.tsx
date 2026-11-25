@@ -155,11 +155,11 @@ export function App() {
 
               <a href="#roadmap" className="group rounded-xl border border-slate-200 bg-white p-3.5 shadow-xs transition hover:border-[#6E4E37] hover:shadow-sm">
                 <div className="flex items-center justify-between">
-                  <span className="rounded bg-[#F1EBE4] px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#6E4E37]">Sec. 5 · Loop</span>
+                  <span className="rounded bg-[#F1EBE4] px-1.5 py-0.5 font-mono text-[10px] font-bold text-[#6E4E37]">Sec. 5 · Fig. 6</span>
                   <ArrowDown className="h-3.5 w-3.5 text-slate-400 group-hover:text-[#6E4E37]" />
                 </div>
                 <div className="mt-1.5 text-xs font-semibold text-slate-900">Future Directions</div>
-                <p className="mt-0.5 text-[11px] text-slate-600">Interactive online–offline loop linking 5 challenges.</p>
+                <p className="mt-0.5 text-[11px] text-slate-600">Connector-insertion loop linking Challenges 5.1–5.5.</p>
               </a>
             </div>
           </div>
