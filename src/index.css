@@ -1,0 +1,30 @@
+@import "tailwindcss";
+@import "katex/dist/katex.min.css";
+
+@theme {
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-serif: "Newsreader", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    font-family: var(--font-sans);
+    background-color: #FAF9F6;
+    color: #1F2937;
+  }
+}
+
+/* Custom clean range sliders */
+input[type="range"] {
+  accent-color: #2B5B84;
+}
+
+.katex-display {
+  margin: 0.45rem 0 !important;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
