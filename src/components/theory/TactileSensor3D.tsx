@@ -1,14 +1,12 @@
-import { useMemo, useRef } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { useMemo, useRef, type MutableRefObject } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import {
   OrbitControls,
-  Html,
   ContactShadows,
   Environment,
   Lightformer,
   RoundedBox,
   Edges,
-  Line,
 } from '@react-three/drei';
 import * as THREE from 'three';
 import type { ComponentId, OpticalCueId } from '../../data/opticalCues';
@@ -27,12 +25,38 @@ export interface SensorSimState {
   explode: number;        // 0..1
   selectedComponent: ComponentId | null;
   darkBench: boolean;
-  showRays: boolean;
 }
 
 interface TactileSensor3DProps {
   state: SensorSimState;
   onSelectComponent: (id: ComponentId) => void;
+}
+
+interface CalloutMeta {
+  id: ComponentId;
+  num: number;
+  label: string;
+  accent: string;
+  badgeBg: string;
+}
+
+interface CalloutRefs {
+  paths: Record<ComponentId, SVGPathElement | null>;
+  dots: Record<ComponentId, SVGCircleElement | null>;
+  halos: Record<ComponentId, SVGCircleElement | null>;
+  labels: Record<ComponentId, HTMLButtonElement | null>;
+}
+
+// Compute shared exploded vertical offsets for both 3D geometry and screen-right callout anchors
+function computeLayerOffsets(explode: number) {
+  return {
+    assemblyY: -0.2 - explode * 0.14,
+    elastomerY: 1.05 + explode * 0.62,
+    illumY: 0.42 + explode * 0.2,
+    opticsY: -0.22 - explode * 0.1,
+    sensorY: -0.82 - explode * 0.44,
+    housingY: -0.02 - explode * 0.28,
+  };
 }
 
 // Compute physical surface indentation depth & displacement analytically (shared with marker instancing)
@@ -278,14 +302,6 @@ function DeformableElastomer({
           <meshStandardMaterial color="#8FA3B8" roughness={0.4} metalness={0.45} />
         </mesh>
       ))}
-
-      {state.explode > 0.25 && (
-        <Html position={[1.58, 0.02, 0]} center distanceFactor={9.5}>
-          <div className="pointer-events-none whitespace-nowrap rounded-md border border-[#7BA7CE] bg-white/95 px-2 py-0.5 text-[11px] font-semibold text-[#1E3A5F] shadow-xs">
-            1. Deformable Elastomer
-          </div>
-        </Html>
-      )}
     </group>
   );
 }
@@ -296,13 +312,12 @@ function IndenterMesh({ state, yBase }: { state: SensorSimState; yBase: number }
   const pressDrop = Math.min(0.4, (normalForce / 10) * 0.3 * Math.pow(compliance, 0.55));
   const posX = shearX * 0.35;
   const posZ = shearY * 0.35;
-  const liftY = yBase + 0.51 - pressDrop + explode * 0.55;
+  const liftY = yBase + 0.5 - pressDrop + explode * 0.42;
 
   return (
     <group position={[posX, liftY, posZ]} rotation={[0, -twist * 0.6, 0]}>
       {indenter === 'sphere' && (
         <group>
-          {/* Satin ceramic / precision stainless calibration sphere */}
           <mesh castShadow>
             <sphereGeometry args={[0.48, 48, 48]} />
             <meshPhysicalMaterial
@@ -313,7 +328,6 @@ function IndenterMesh({ state, yBase }: { state: SensorSimState; yBase: number }
               clearcoatRoughness={0.12}
             />
           </mesh>
-          {/* Precision probe collar & vertical loading stem */}
           <mesh position={[0, 0.49, 0]} castShadow>
             <cylinderGeometry args={[0.13, 0.16, 0.08, 32]} />
             <meshStandardMaterial color="#94A3B8" metalness={0.55} roughness={0.3} />
@@ -346,7 +360,6 @@ function IndenterMesh({ state, yBase }: { state: SensorSimState; yBase: number }
 
       {indenter === 'texture' && (
         <group position={[0, -0.22, 0]}>
-          {/* Machined satin brass textured disk */}
           <mesh castShadow>
             <cylinderGeometry args={[0.58, 0.58, 0.24, 48]} />
             <meshPhysicalMaterial
@@ -357,12 +370,10 @@ function IndenterMesh({ state, yBase }: { state: SensorSimState; yBase: number }
             />
             <Edges threshold={25} color="#8B5E26" transparent opacity={0.35} />
           </mesh>
-          {/* Raised center rim */}
           <mesh position={[0, 0.13, 0]}>
             <cylinderGeometry args={[0.48, 0.52, 0.03, 40]} />
             <meshStandardMaterial color="#D8AA6A" metalness={0.5} roughness={0.24} />
           </mesh>
-          {/* Micro-ribbed tactile grating underneath */}
           {[-0.36, -0.24, -0.12, 0, 0.12, 0.24, 0.36].map((off, i) => (
             <mesh key={i} position={[off, -0.135, 0]}>
               <boxGeometry args={[0.032, 0.032, 0.86]} />
@@ -403,7 +414,6 @@ function IlluminationSystem({
   onSelect: () => void;
 }) {
   const isSelected = state.selectedComponent === 'illumination';
-  // Editorial refined photometric RGB + amber palette (or warm champagne white-light LEDs)
   const ledColors =
     state.cue === 'shading'
       ? ['#DC5A5A', '#3FA46A', '#4A8FE0', '#E09F3E']
@@ -416,7 +426,6 @@ function IlluminationSystem({
     [0, 0, 1.13, -Math.PI / 2],
   ];
 
-  // Five discrete SMD emitters along each LED carrier bar
   const smdOffsets = [-0.28, -0.14, 0, 0.14, 0.28];
 
   return (
@@ -463,7 +472,7 @@ function IlluminationSystem({
               />
             </RoundedBox>
 
-            {/* 5 discrete micro-SMD LED diodes visible behind diffuser */}
+            {/* 5 discrete micro-SMD LED diodes */}
             {smdOffsets.map((oz, k) => (
               <mesh key={k} position={[0.06, 0, oz]}>
                 <boxGeometry args={[0.018, 0.055, 0.055]} />
@@ -483,51 +492,9 @@ function IlluminationSystem({
                 <meshStandardMaterial color="#D4A754" metalness={0.75} roughness={0.25} />
               </mesh>
             ))}
-
-            {/* Delicate inward-aimed optical rays strictly inside chamber toward elastomer */}
-            {state.showRays && (
-              <group>
-                {/* Soft low-opacity triangular illumination fan pointing UP & INWARD */}
-                {[-0.22, 0, 0.22].map((oz, k) => (
-                  <Line
-                    key={k}
-                    points={[
-                      [0.07, 0.03, oz],
-                      [0.95, 0.44, oz * 0.55],
-                    ]}
-                    color={col}
-                    lineWidth={1.15}
-                    dashed
-                    dashSize={0.06}
-                    gapSize={0.045}
-                    transparent
-                    opacity={state.darkBench ? 0.62 : 0.46}
-                  />
-                ))}
-                {/* Ultra-subtle soft volumetric glow sheet strictly inside housing */}
-                <mesh position={[0.48, 0.22, 0]} rotation={[0, 0, 0.43]}>
-                  <planeGeometry args={[0.88, 0.36]} />
-                  <meshBasicMaterial
-                    color={col}
-                    transparent
-                    opacity={state.darkBench ? 0.11 : 0.075}
-                    side={THREE.DoubleSide}
-                    depthWrite={false}
-                  />
-                </mesh>
-              </group>
-            )}
           </group>
         );
       })}
-
-      {state.explode > 0.25 && (
-        <Html position={[1.65, 0, 0]} center distanceFactor={9.5}>
-          <div className="pointer-events-none whitespace-nowrap rounded-md border border-amber-500/80 bg-white/95 px-2 py-0.5 text-[11px] font-semibold text-amber-800 shadow-xs">
-            2. Illumination System
-          </div>
-        </Html>
-      )}
     </group>
   );
 }
@@ -553,7 +520,6 @@ function ImagingOptics({
         onSelect();
       }}
     >
-      {/* Sleek machined bridge bar connecting stereo lenses */}
       {stereo && (
         <RoundedBox args={[1.38, 0.09, 0.38]} radius={0.02} smoothness={3} position={[0, -0.1, 0]}>
           <meshStandardMaterial color="#8A99AA" metalness={0.5} roughness={0.32} />
@@ -563,13 +529,11 @@ function ImagingOptics({
 
       {offsets.map((ox, i) => (
         <group key={i} position={[ox, 0, 0]}>
-          {/* Lower threaded M12 mounting collar */}
           <mesh position={[0, -0.16, 0]}>
             <cylinderGeometry args={[0.25, 0.25, 0.12, 36]} />
             <meshStandardMaterial color="#334155" metalness={0.6} roughness={0.36} />
           </mesh>
 
-          {/* Main precision satin gunmetal lens barrel */}
           <mesh position={[0, 0.02, 0]} castShadow>
             <cylinderGeometry args={[0.33, 0.29, 0.28, 40]} />
             <meshStandardMaterial
@@ -579,7 +543,6 @@ function ImagingOptics({
             />
           </mesh>
 
-          {/* Machined focus/knurl accent rings */}
           {[-0.04, 0.04, 0.11].map((ry, k) => (
             <mesh key={k} position={[0, ry, 0]}>
               <torusGeometry args={[0.315 + k * 0.008, 0.012, 12, 40]} />
@@ -587,19 +550,16 @@ function ImagingOptics({
             </mesh>
           ))}
 
-          {/* Chamfered silver anodized retaining bezel ring */}
           <mesh position={[0, 0.175, 0]}>
             <cylinderGeometry args={[0.335, 0.335, 0.045, 40]} />
             <meshStandardMaterial color="#CBD5E1" metalness={0.62} roughness={0.22} />
           </mesh>
 
-          {/* Dark internal aperture stop */}
           <mesh position={[0, 0.198, 0]} rotation={[-Math.PI / 2, 0, 0]}>
             <ringGeometry args={[0.16, 0.29, 36]} />
             <meshStandardMaterial color="#1E293B" roughness={0.6} />
           </mesh>
 
-          {/* Multi-coated convex optical crown glass element */}
           <mesh position={[0, 0.19, 0]}>
             <sphereGeometry args={[0.24, 36, 20, 0, Math.PI * 2, 0, Math.PI * 0.38]} />
             <meshPhysicalMaterial
@@ -615,60 +575,8 @@ function ImagingOptics({
               ior={1.52}
             />
           </mesh>
-
-          {/* Clean architectural optical ray lines connecting elastomer -> lens -> sensor */}
-          {state.showRays && (
-            <group>
-              {[
-                [-0.62, -0.62],
-                [0.62, -0.62],
-                [-0.62, 0.62],
-                [0.62, 0.62],
-              ].map(([rx, rz], k) => {
-                const spread = stereo ? 0.52 : 0.78;
-                const rayCol = stereo ? (i === 0 ? '#3B82F6' : '#8B5CF6') : '#C97B36';
-                return (
-                  <group key={k}>
-                    {/* Upper rays from elastomer surface converging into lens */}
-                    <Line
-                      points={[
-                        [rx * spread, 1.05, rz * spread],
-                        [rx * 0.22, 0.22, rz * 0.22],
-                      ]}
-                      color={rayCol}
-                      lineWidth={1.1}
-                      dashed
-                      dashSize={0.055}
-                      gapSize={0.04}
-                      transparent
-                      opacity={state.darkBench ? 0.55 : 0.44}
-                    />
-                    {/* Lower rays focusing from lens onto CMOS active die */}
-                    <Line
-                      points={[
-                        [rx * 0.16, -0.2, rz * 0.16],
-                        [rx * 0.2, -0.52, rz * 0.2],
-                      ]}
-                      color={rayCol}
-                      lineWidth={1.0}
-                      transparent
-                      opacity={state.darkBench ? 0.5 : 0.38}
-                    />
-                  </group>
-                );
-              })}
-            </group>
-          )}
         </group>
       ))}
-
-      {state.explode > 0.25 && (
-        <Html position={[1.58, 0, 0]} center distanceFactor={9.5}>
-          <div className="pointer-events-none whitespace-nowrap rounded-md border border-slate-400 bg-white/95 px-2 py-0.5 text-[11px] font-semibold text-slate-700 shadow-xs">
-            3. Imaging Optics {stereo ? '(Stereo)' : ''}
-          </div>
-        </Html>
-      )}
     </group>
   );
 }
@@ -696,7 +604,6 @@ function ImageSensorBoard({
         onSelect();
       }}
     >
-      {/* Chamfered matte editorial-navy PCB */}
       <RoundedBox args={[pcbW, 0.075, pcbD]} radius={0.022} smoothness={3} receiveShadow castShadow>
         <meshStandardMaterial
           color={isSelected ? '#274E78' : '#1E3A5F'}
@@ -711,7 +618,6 @@ function ImageSensorBoard({
         />
       </RoundedBox>
 
-      {/* Four brass corner standoffs & mounting screws */}
       {[
         [-pcbW / 2 + 0.1, -pcbD / 2 + 0.1],
         [pcbW / 2 - 0.1, -pcbD / 2 + 0.1],
@@ -730,7 +636,6 @@ function ImageSensorBoard({
         </group>
       ))}
 
-      {/* Delicate SMD decoupling capacitors & resistors along PCB edge */}
       {[-0.36, -0.22, -0.08, 0.08, 0.22, 0.36].map((cx, idx) => (
         <mesh key={idx} position={[cx, 0.05, pcbD / 2 - 0.14]}>
           <boxGeometry args={[0.065, 0.028, 0.036]} />
@@ -742,7 +647,6 @@ function ImageSensorBoard({
         </mesh>
       ))}
 
-      {/* Rear gold header + slim Kapton flex ribbon exiting to back */}
       <mesh position={[0, 0.055, -pcbD / 2 + 0.09]}>
         <boxGeometry args={[0.52, 0.045, 0.1]} />
         <meshStandardMaterial color="#0F172A" roughness={0.4} />
@@ -752,19 +656,16 @@ function ImageSensorBoard({
         <meshStandardMaterial color="#C07D42" metalness={0.25} roughness={0.38} />
       </mesh>
 
-      {/* Ceramic QFN package(s) + iridescent silicon active pixel die */}
       {offsets.map((ox, i) => (
         <group key={i} position={[ox, 0.068, 0]}>
           <RoundedBox args={[0.58, 0.058, 0.58]} radius={0.014} smoothness={2}>
             <meshStandardMaterial color="#182232" roughness={0.32} metalness={0.22} />
             <Edges threshold={18} color="#475569" transparent opacity={0.4} />
           </RoundedBox>
-          {/* Gold bonding bezel frame around silicon die */}
           <mesh position={[0, 0.031, 0]}>
             <boxGeometry args={[0.45, 0.008, 0.45]} />
             <meshStandardMaterial color="#D4A754" metalness={0.78} roughness={0.24} />
           </mesh>
-          {/* Iridescent active CMOS / Event-DVS silicon die */}
           <mesh position={[0, 0.036, 0]}>
             <boxGeometry args={[0.39, 0.012, 0.39]} />
             <meshPhysicalMaterial
@@ -780,14 +681,6 @@ function ImageSensorBoard({
           </mesh>
         </group>
       ))}
-
-      {state.explode > 0.25 && (
-        <Html position={[1.58, 0, 0]} center distanceFactor={9.5}>
-          <div className="pointer-events-none whitespace-nowrap rounded-md border border-[#2B5B84] bg-white/95 px-2 py-0.5 text-[11px] font-semibold text-[#1E3A5F] shadow-xs">
-            4. Image Sensor {state.cue === 'events' ? '(Event DVS)' : '(CMOS)'}
-          </div>
-        </Html>
-      )}
     </group>
   );
 }
@@ -815,7 +708,6 @@ function CutawayHousing({
         onSelect();
       }}
     >
-      {/* Chamfered machined aluminum base plinth */}
       <RoundedBox
         args={[2.76, 0.16, 2.76]}
         radius={0.035}
@@ -828,7 +720,6 @@ function CutawayHousing({
         <Edges threshold={18} color={edgeColor} transparent opacity={edgeOpacity} />
       </RoundedBox>
 
-      {/* Subtle recessed elastomer floor feet */}
       {[
         [-1.12, -1.12],
         [1.12, -1.12],
@@ -841,7 +732,6 @@ function CutawayHousing({
         </mesh>
       ))}
 
-      {/* Back wall (semi-translucent architectural cutaway) */}
       <RoundedBox
         args={[2.68, 2.12, 0.11]}
         radius={0.025}
@@ -858,7 +748,6 @@ function CutawayHousing({
         <Edges threshold={18} color={edgeColor} transparent opacity={edgeOpacity} />
       </RoundedBox>
 
-      {/* Four chamfered corner structural pillars */}
       {[
         [-1.29, -1.29],
         [1.29, -1.29],
@@ -878,7 +767,6 @@ function CutawayHousing({
         </RoundedBox>
       ))}
 
-      {/* Top machined bezel rails */}
       {[
         [0, 1.055, -1.29, 2.75, 0.105, 0.17],
         [0, 1.055, 1.29, 2.75, 0.105, 0.17],
@@ -899,7 +787,6 @@ function CutawayHousing({
         </RoundedBox>
       ))}
 
-      {/* Four countersunk hex socket cap screws in top bezel corners */}
       {[
         [-1.29, -1.29],
         [1.29, -1.29],
@@ -921,16 +808,174 @@ function CutawayHousing({
   );
 }
 
+// Projects 3D part anchors into 2D screen space at 60fps and updates screen-right leader lines & pills directly
+function ScreenRightCalloutProjector({
+  state,
+  calloutRefs,
+}: {
+  state: SensorSimState;
+  calloutRefs: MutableRefObject<CalloutRefs>;
+}) {
+  const { camera, size } = useThree();
+  const camRight = useMemo(() => new THREE.Vector3(), []);
+  const projVec = useMemo(() => new THREE.Vector3(), []);
+  const lastShiftRef = useRef('');
+
+  useFrame(() => {
+    // Camera-invariant screen-space left shift when exploded so right-hand callout rail stays clear at any orbit angle
+    const targetShiftPx = state.explode > 0.12 ? Math.round(size.width * 0.115) : 0;
+    const shiftKey = `${targetShiftPx}x${size.width}x${size.height}`;
+    if (
+      camera instanceof THREE.PerspectiveCamera &&
+      lastShiftRef.current !== shiftKey
+    ) {
+      lastShiftRef.current = shiftKey;
+      if (targetShiftPx > 0) {
+        camera.setViewOffset(size.width, size.height, targetShiftPx, 0, size.width, size.height);
+      } else {
+        camera.clearViewOffset();
+      }
+      camera.updateProjectionMatrix();
+    }
+
+    if (state.explode <= 0.12) return;
+
+    const { assemblyY, elastomerY, illumY, opticsY, sensorY, housingY } = computeLayerOffsets(
+      state.explode
+    );
+    const padH = 0.16 + (state.padThickness / 6) * 0.22;
+    const stereo = state.cue === 'multiview';
+
+    // Camera-right unit vector projected onto the horizontal XZ plane so anchor points always attach
+    // to whichever side of each 3D part faces the right edge of the screen
+    camRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
+    camRight.y = 0;
+    if (camRight.lengthSq() < 1e-4) camRight.set(1, 0, 0);
+    camRight.normalize();
+
+    // Pick whichever LED bar is closest to screen-right
+    const ledPositions: [number, number][] = [
+      [-1.13, 0],
+      [1.13, 0],
+      [0, -1.13],
+      [0, 1.13],
+    ];
+    let bestLed = ledPositions[1];
+    let bestDot = -Infinity;
+    for (const lp of ledPositions) {
+      const d = lp[0] * camRight.x + lp[1] * camRight.z;
+      if (d > bestDot) {
+        bestDot = d;
+        bestLed = lp;
+      }
+    }
+
+    // Pick whichever stereo lens is closest to screen-right
+    const lensCenterX = stereo ? (camRight.x >= 0 ? 0.52 : -0.52) : 0;
+
+    // Physical 3D world-space anchor points for each component
+    const anchors: Record<ComponentId, [number, number, number]> = {
+      elastomer: [
+        camRight.x * 1.16,
+        assemblyY + elastomerY - padH * 0.45,
+        camRight.z * 1.16,
+      ],
+      illumination: [bestLed[0], assemblyY + illumY, bestLed[1]],
+      optics: [
+        lensCenterX + camRight.x * 0.34,
+        assemblyY + opticsY + 0.04,
+        camRight.z * 0.34,
+      ],
+      sensor: [
+        camRight.x * (stereo ? 0.96 : 0.62),
+        assemblyY + sensorY + 0.04,
+        camRight.z * 0.62,
+      ],
+      housing: [
+        camRight.x * 1.32,
+        assemblyY + housingY - 1.06,
+        camRight.z * 1.32,
+      ],
+    };
+
+    const ids: ComponentId[] = ['elastomer', 'illumination', 'optics', 'sensor', 'housing'];
+    const projected = ids.map((id) => {
+      const [wx, wy, wz] = anchors[id];
+      projVec.set(wx, wy, wz).project(camera);
+      const ax = (projVec.x * 0.5 + 0.5) * size.width;
+      const ay = (-projVec.y * 0.5 + 0.5) * size.height;
+      return { id, ax, ay, ly: ay };
+    });
+
+    // Sort by projected screen Y so leader lines never cross regardless of viewpoint
+    projected.sort((a, b) => a.ay - b.ay);
+
+    // Enforce clean vertical spacing on the right rail within viewport margins
+    const minTop = 28;
+    const maxBottom = size.height - 46;
+    const minGap = 40;
+    for (let i = 0; i < projected.length; i++) {
+      projected[i].ly = Math.max(minTop, Math.min(maxBottom, projected[i].ay));
+      if (i > 0 && projected[i].ly - projected[i - 1].ly < minGap) {
+        projected[i].ly = projected[i - 1].ly + minGap;
+      }
+    }
+    if (projected[projected.length - 1].ly > maxBottom) {
+      projected[projected.length - 1].ly = maxBottom;
+      for (let i = projected.length - 2; i >= 0; i--) {
+        if (projected[i + 1].ly - projected[i].ly < minGap) {
+          projected[i].ly = projected[i + 1].ly - minGap;
+        }
+      }
+    }
+
+    const rightMargin = 14;
+    for (const item of projected) {
+      const labelEl = calloutRefs.current.labels[item.id];
+      const pathEl = calloutRefs.current.paths[item.id];
+      const dotEl = calloutRefs.current.dots[item.id];
+      const haloEl = calloutRefs.current.halos[item.id];
+
+      const labelWidth = labelEl ? labelEl.offsetWidth : 168;
+      const labelLeftX = size.width - rightMargin - labelWidth;
+
+      if (labelEl) {
+        labelEl.style.transform = `translate3d(0, ${(item.ly - labelEl.offsetHeight / 2).toFixed(1)}px, 0)`;
+      }
+
+      if (dotEl) {
+        dotEl.setAttribute('cx', item.ax.toFixed(1));
+        dotEl.setAttribute('cy', item.ay.toFixed(1));
+      }
+      if (haloEl) {
+        haloEl.setAttribute('cx', item.ax.toFixed(1));
+        haloEl.setAttribute('cy', item.ay.toFixed(1));
+      }
+
+      if (pathEl) {
+        // Crisp CAD elbow leader line: anchor -> angled knee -> horizontal landing into label left edge
+        const dy = Math.abs(item.ly - item.ay);
+        const kneeRoom = Math.max(14, Math.min(34, dy * 0.45 + 14));
+        const kneeX = Math.max(item.ax + 10, Math.min(labelLeftX - 12, labelLeftX - kneeRoom));
+        const d =
+          item.ax < labelLeftX - 12
+            ? `M ${item.ax.toFixed(1)} ${item.ay.toFixed(1)} L ${kneeX.toFixed(1)} ${item.ly.toFixed(1)} L ${labelLeftX.toFixed(1)} ${item.ly.toFixed(1)}`
+            : `M ${item.ax.toFixed(1)} ${item.ay.toFixed(1)} L ${labelLeftX.toFixed(1)} ${item.ly.toFixed(1)}`;
+        pathEl.setAttribute('d', d);
+      }
+    }
+  });
+
+  return null;
+}
+
 function SensorAssembly({ state, onSelectComponent }: TactileSensor3DProps) {
-  const e = state.explode;
-  const elastomerY = 1.05 + e * 0.72;
-  const illumY = 0.44 + e * 0.25;
-  const opticsY = -0.22 - e * 0.12;
-  const sensorY = -0.82 - e * 0.55;
-  const housingY = -0.02 - e * 0.35;
+  const { assemblyY, elastomerY, illumY, opticsY, sensorY, housingY } = computeLayerOffsets(
+    state.explode
+  );
 
   return (
-    <group position={[0, -0.14, 0]}>
+    <group position={[0, assemblyY, 0]}>
       <IndenterMesh state={state} yBase={elastomerY} />
       <DeformableElastomer
         state={state}
@@ -962,6 +1007,54 @@ function SensorAssembly({ state, onSelectComponent }: TactileSensor3DProps) {
 }
 
 export function TactileSensor3D({ state, onSelectComponent }: TactileSensor3DProps) {
+  const calloutRefs = useRef<CalloutRefs>({
+    paths: { elastomer: null, illumination: null, optics: null, sensor: null, housing: null },
+    dots: { elastomer: null, illumination: null, optics: null, sensor: null, housing: null },
+    halos: { elastomer: null, illumination: null, optics: null, sensor: null, housing: null },
+    labels: { elastomer: null, illumination: null, optics: null, sensor: null, housing: null },
+  });
+
+  const showCallouts = state.explode > 0.12;
+  const stereo = state.cue === 'multiview';
+
+  const callouts: CalloutMeta[] = [
+    {
+      id: 'elastomer',
+      num: 1,
+      label: 'Deformable Elastomer',
+      accent: '#2B5B84',
+      badgeBg: '#E6F1FA',
+    },
+    {
+      id: 'illumination',
+      num: 2,
+      label: 'Illumination System',
+      accent: '#B45309',
+      badgeBg: '#FEF3C7',
+    },
+    {
+      id: 'optics',
+      num: 3,
+      label: stereo ? 'Imaging Optics (Stereo)' : 'Imaging Optics',
+      accent: '#475569',
+      badgeBg: '#F1F5F9',
+    },
+    {
+      id: 'sensor',
+      num: 4,
+      label: state.cue === 'events' ? 'Image Sensor (DVS)' : 'Image Sensor (CMOS)',
+      accent: '#1E3A5F',
+      badgeBg: '#E8EFF8',
+    },
+    {
+      id: 'housing',
+      num: 5,
+      label: 'Cutaway Housing',
+      accent: '#64748B',
+      badgeBg: '#F1F5F9',
+    },
+  ];
+
   return (
     <div
       className={`relative h-[435px] w-full overflow-hidden rounded-xl border transition-colors ${
@@ -971,7 +1064,7 @@ export function TactileSensor3D({ state, onSelectComponent }: TactileSensor3DPro
       }`}
     >
       <Canvas
-        camera={{ position: [4.2, 2.85, 4.65], fov: 31 }}
+        camera={{ position: [4.65, 3.05, 5.1], fov: 31 }}
         shadows
         dpr={[1, 2]}
         gl={{
@@ -1044,7 +1137,6 @@ export function TactileSensor3D({ state, onSelectComponent }: TactileSensor3DPro
             rotation={[0, -Math.PI / 2, 0]}
             color="#F9E7C9"
           />
-          {/* Soft floor bounce so aluminum undersides stay clean and bright */}
           <Lightformer
             form="rect"
             intensity={state.darkBench ? 0.25 : 0.95}
@@ -1056,25 +1148,110 @@ export function TactileSensor3D({ state, onSelectComponent }: TactileSensor3DPro
         </Environment>
 
         <SensorAssembly state={state} onSelectComponent={onSelectComponent} />
+        <ScreenRightCalloutProjector state={state} calloutRefs={calloutRefs} />
 
         <ContactShadows
-          position={[0, -1.42 - state.explode * 0.35, 0]}
+          position={[0, -1.48 - state.explode * 0.42, 0]}
           opacity={state.darkBench ? 0.42 : 0.22}
-          scale={7.5}
+          scale={7.8}
           blur={2.8}
-          far={4}
+          far={4.5}
           color={state.darkBench ? '#020617' : '#3B4856'}
         />
 
         <OrbitControls
+          target={[0, -0.06, 0]}
           enablePan={false}
           enableDamping
           dampingFactor={0.07}
-          minDistance={3.4}
-          maxDistance={9.0}
+          minDistance={3.8}
+          maxDistance={9.8}
           maxPolarAngle={Math.PI * 0.62}
         />
       </Canvas>
+
+      {/* Camera-invariant screen-right architectural leader lines & clickable labels (Explode View) */}
+      {showCallouts && (
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <svg className="absolute inset-0 h-full w-full">
+            {callouts.map((c) => {
+              const isSelected = state.selectedComponent === c.id;
+              const strokeCol = isSelected
+                ? c.accent
+                : state.darkBench
+                ? '#94A3B8'
+                : '#64748B';
+              return (
+                <g key={c.id}>
+                  <path
+                    ref={(el) => {
+                      calloutRefs.current.paths[c.id] = el;
+                    }}
+                    fill="none"
+                    stroke={strokeCol}
+                    strokeWidth={isSelected ? 1.8 : 1.15}
+                    strokeOpacity={isSelected ? 0.95 : 0.65}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <circle
+                    ref={(el) => {
+                      calloutRefs.current.halos[c.id] = el;
+                    }}
+                    r={isSelected ? 6 : 4.5}
+                    fill={state.darkBench ? '#0D1420' : '#FFFFFF'}
+                    fillOpacity={0.85}
+                  />
+                  <circle
+                    ref={(el) => {
+                      calloutRefs.current.dots[c.id] = el;
+                    }}
+                    r={isSelected ? 3.5 : 2.6}
+                    fill={isSelected ? c.accent : strokeCol}
+                  />
+                </g>
+              );
+            })}
+          </svg>
+
+          {callouts.map((c) => {
+            const isSelected = state.selectedComponent === c.id;
+            return (
+              <button
+                key={c.id}
+                ref={(el) => {
+                  calloutRefs.current.labels[c.id] = el;
+                }}
+                type="button"
+                onClick={() => onSelectComponent(c.id)}
+                style={{
+                  borderColor: isSelected ? c.accent : undefined,
+                }}
+                className={`pointer-events-auto absolute right-[14px] top-0 flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border px-2 py-1 text-[11px] font-semibold shadow-xs backdrop-blur-md transition-colors ${
+                  state.darkBench
+                    ? isSelected
+                      ? 'bg-slate-900/95 text-white'
+                      : 'border-slate-700/90 bg-slate-900/85 text-slate-200 hover:border-slate-500'
+                    : isSelected
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'border-slate-200/90 bg-white/92 text-slate-700 hover:border-slate-400'
+                }`}
+              >
+                <span
+                  style={{
+                    backgroundColor: isSelected ? c.accent : c.badgeBg,
+                    color: isSelected ? '#FFFFFF' : c.accent,
+                  }}
+                  className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full font-mono text-[10px] font-bold"
+                >
+                  {c.num}
+                </span>
+                <span>{c.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Subtle editorial overlay hint */}
       <div

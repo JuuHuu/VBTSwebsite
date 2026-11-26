@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Layers, Sun, Moon, Eye, Sparkles, Sliders, RotateCcw } from 'lucide-react';
+import { Layers, Sun, Moon, Sparkles, Sliders, RotateCcw } from 'lucide-react';
 import {
   SENSOR_COMPONENTS,
   OPTICAL_CUES,
@@ -23,7 +23,6 @@ const INITIAL_STATE: SensorSimState = {
   explode: 0.0,
   selectedComponent: 'elastomer',
   darkBench: false,
-  showRays: true,
 };
 
 export function TheoryModule() {
@@ -95,14 +94,6 @@ export function TheoryModule() {
               <span className="w-8 font-mono text-xs text-slate-600">{Math.round(sim.explode * 100)}%</span>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => update('showRays', !sim.showRays)}
-                className={`inline-flex cursor-pointer items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium transition ${
-                  sim.showRays ? 'bg-amber-100 text-amber-900' : 'bg-slate-100 text-slate-600'
-                }`}
-              >
-                <Eye className="h-3.5 w-3.5" /> Light Rays
-              </button>
               <button
                 onClick={() => update('darkBench', !sim.darkBench)}
                 className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
